@@ -24,7 +24,7 @@ library(tidyverse)
 library(coin)
 
 
-ALARUM_Community_DATA <- read_excel("C:/Users/briems/OneDrive - ITG/Bureaublad/ALARUM/7. Implementation/Data extracts/ALARUM-Community-DATA_Nanoro_FV.xlsx")
+ALARUM_Community_DATA <- read_excel("data/ALARUM-Community-DATA_Nanoro_FV.xlsx")
 
 
 ALARUM_menage <- ALARUM_Community_DATA %>%
