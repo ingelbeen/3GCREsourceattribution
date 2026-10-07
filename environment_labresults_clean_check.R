@@ -91,12 +91,7 @@ write_csv(list_filtration, "list_filtration_not_drinkingwater.csv")
 # (b) TBX used although the sample is neither drinking water nor a hand rinse
 list_tbx <- quantificationlabresults |>  filter(med_tbx=="1" & !(sample_type %in% c("drinkingwater", "handrinse_adult", "handrinse_underfive"))) |>
   select(id_clean, sample_type, date_prelev, date_recep_lab, date_deb_trait, dilut_titre)
-cat("\nTBX used, not drinking water / hand rinse:", nrow(list_tbx), "samples\n")
 print(list_tbx)
-write_csv(list_tbx, file.path(out_dir, "list_tbx_used_non_water_non_handrinse.csv"))
-list_tbx_ctx <- quantificationlabresults |>  filter(med_tbx_ctx=="1" & !(sample_type %in% c("drinkingwater", "handrinse_adult", "handrinse_underfive"))) |>
-  select(id_clean, sample_type, date_prelev, date_recep_lab, date_deb_trait, dilut_titre)
-print(list_tbx_ctx)
 
 # check whether dilution reported as per sample type
 table(quantificationlabresults$sample_type, quantificationlabresults$dilution)
@@ -239,11 +234,7 @@ unit_issues <- bind_rows(
 
 print(unit_issues, n = 100)
 count(unit_issues, sample_type, lab_unit)    # how many per combination
-write_csv(unit_issues, "output_lab_cleaning/list_unit_issues.csv")
 
-mising_or_illogical_units_for_sample_type <- quantificationlabresults %>%
-  
-  
 # are the counts in the range where plates are reliable (10-200 colonies)?
 summary_counts <- quantificationlabresults %>%
   select(c_tbx, c_tbx_ctx, c_mc, c_mc_ctx) |>
@@ -251,27 +242,26 @@ summary_counts <- quantificationlabresults %>%
   filter(!is.na(count)) |>
   mutate(range = case_when(count == 0 ~ "0", count < 10 ~ "1-9", count <= 200 ~ "10-200", TRUE ~ ">200")) |>
   count(medium, range) |> print(n = 30)
-summary_counts
 
-# recalculate concentrations -------------------------------------------
+# recalculate concentrations 
 # concentration = colony count / (volume in mL x dilution factor 10^x)
 # (x 100 when the lab reports per 100 mL, so both are in the lab's unit)
+quantificationlabresults$vol_mL <- as.numeric(quantificationlabresults$vol_mL)
 quantificationlabresults <- quantificationlabresults |>  mutate(
     conc_ecoli_tbx = c_tbx     / (vol_mL * 10^titer_tbx_log10)     * unit_mult,
     conc_ecoli_mc  = c_mc      / (vol_mL * 10^titer_mc_log10)      * unit_mult,
     conc_esbl_tbx  = c_tbx_ctx / (vol_mL * 10^titer_tbx_ctx_log10) * unit_mult,
     conc_esbl_mc   = c_mc_ctx  / (vol_mL * 10^titer_mc_ctx_log10)  * unit_mult,
     # the recomputed value to compare with the lab: from the medium used
-    expected_ecoli = if_else(med_tbx,     conc_ecoli_tbx, conc_ecoli_mc),
-    expected_esbl  = if_else(med_tbx_ctx, conc_esbl_tbx,  conc_esbl_mc),
-    expected_ecoli_cens = if_else(med_tbx,     cens_tbx,     cens_mc),
-    expected_esbl_cens  = if_else(med_tbx_ctx, cens_tbx_ctx, cens_mc_ctx))
+    expected_ecoli = if_else(med_tbx=="1",     conc_ecoli_tbx, conc_ecoli_mc),
+    expected_esbl  = if_else(med_tbx_ctx=="1", conc_esbl_tbx,  conc_esbl_mc),
+    expected_ecoli_cens = if_else(med_tbx=="1",     cens_tbx,     cens_mc),
+    expected_esbl_cens  = if_else(med_tbx_ctx=="1", cens_tbx_ctx, cens_mc_ctx))
 
+# compare lab value with recalculated value 
+tol_rel          <- 0.01  # lab value counts as "equal" to recomputed value if within 1%
 
-# ---- 11. Compare lab value with recomputed value ----------------------------
-# "match": lab value within tol_rel (1%) of the recomputed value
-quantificationlabresults <- quantificationlabresults |>
-  mutate(
+quantificationlabresults <- quantificationlabresults |>  mutate(
     ec_status = case_when(
       is.na(lab_ec) & is.na(expected_ecoli)             ~ "both missing",
       is.na(lab_ec)                                     ~ "lab value missing",
@@ -294,15 +284,14 @@ quantificationlabresults <- quantificationlabresults |>
     ec_log10_ratio = if_else(lab_ec > 0 & expected_ecoli > 0, log10(lab_ec / expected_ecoli), NA_real_),
     es_log10_ratio = if_else(lab_es > 0 & expected_esbl > 0,  log10(lab_es / expected_esbl),  NA_real_),
     # impossible: more ESBL E. coli than E. coli
-    esbl_above_ecoli = !lab_ec_cens & !lab_es_cens & lab_es > lab_ec * (1 + tol_rel)
-  )
+    esbl_above_ecoli = !lab_ec_cens & !lab_es_cens & lab_es > lab_ec * (1 + tol_rel))
 
-cat("\nE. coli: lab value vs recomputed\n");        print(count(d, ec_status))
-cat("\nESBL E. coli: lab value vs recomputed\n");   print(count(d, es_status))
-cat("\nE. coli status by sample type\n");           print(count(d, sample_type, ec_status), n = 40)
+cat("\nE. coli: lab value vs recomputed\n");        print(count(quantificationlabresults, ec_status))
+cat("\nESBL E. coli: lab value vs recomputed\n");   print(count(quantificationlabresults, es_status))
+cat("\nE. coli status by sample type\n");           print(count(quantificationlabresults, sample_type, ec_status), n = 40)
 cat("\nSize of the discrepancies, log10(lab / recomputed):\n")
-print(table(round(d$ec_log10_ratio[d$ec_status == "DISCREPANCY"], 1)))
-cat("\nLab ESBL concentration above lab E. coli concentration:", sum(d$esbl_above_ecoli, na.rm = TRUE), "\n")
+print(table(round(quantificationlabresults$ec_log10_ratio[quantificationlabresults$ec_status == "DISCREPANCY"], 1)))
+cat("\nLab ESBL concentration above lab E. coli concentration:", sum(quantificationlabresults$esbl_above_ecoli, na.rm = TRUE), "\n")
 
 # Samples to look at
 quantificationlabresults |> filter(ec_status == "DISCREPANCY" | es_status == "DISCREPANCY" | esbl_above_ecoli) |>
@@ -311,7 +300,7 @@ quantificationlabresults |> filter(ec_status == "DISCREPANCY" | es_status == "DI
          nbre_colo_tbx, nbre_colo_mcc, nbre_colo_tbx_ctx, nbre_colo_mcc_ctx,
          nbre_e_coli_volum, expected_ecoli, ec_status,
          nbre_blse_volum, expected_esbl, es_status) |>
-  write_csv(file.path(out_dir, "flagged_discrepancies.csv"))
+  write_csv("flagged_discrepancies.csv")
 
 # Plot: lab vs recomputed (points on the diagonal agree)
 quantificationlabresults |> filter(expected_ecoli > 0, lab_ec > 0) |>
@@ -320,46 +309,31 @@ quantificationlabresults |> filter(expected_ecoli > 0, lab_ec > 0) |>
   scale_x_log10() + scale_y_log10() +
   labs(x = "Recomputed E. coli concentration", y = "Lab-calculated E. coli concentration") +
   theme_bw()
-ggsave(file.path(out_dir, "lab_vs_recomputed_ecoli.png"), width = 6, height = 5, dpi = 200)
+ggsave("lab_vs_recomputed_ecoli.png", width = 6, height = 5, dpi = 200)
 
 
-# ---- 12. TBX versus MacConkey (samples where both were read) ----------------
+# TBX versus MacConkey (samples where both were read) ----------------
 both_ecoli <- quantificationlabresults |> filter(!is.na(conc_ecoli_tbx), !is.na(conc_ecoli_mc))
 both_esbl  <- quantificationlabresults |> filter(!is.na(conc_esbl_tbx),  !is.na(conc_esbl_mc))
 cat("\nSamples with both TBX and MC read: E. coli", nrow(both_ecoli),
-    "| ESBL", nrow(both_esbl), "\n")
+    "| ESBL", nrow(both_esbl), "\n") # none 
 
-if (nrow(both_ecoli) > 0) {
-  both_ecoli |>
-    filter(conc_ecoli_tbx > 0, conc_ecoli_mc > 0) |>
-    mutate(log10_ratio_tbx_mc = log10(conc_ecoli_tbx / conc_ecoli_mc)) |>
-    summarise(n = n(), median = median(log10_ratio_tbx_mc),
-              within_2fold = mean(abs(log10_ratio_tbx_mc) <= log10(2))) |> print()
-}
-if (nrow(both_esbl) > 0) {
-  both_esbl |>
-    filter(conc_esbl_tbx > 0, conc_esbl_mc > 0) |>
-    mutate(log10_ratio_tbx_mc = log10(conc_esbl_tbx / conc_esbl_mc)) |>
-    summarise(n = n(), median = median(log10_ratio_tbx_mc),
-              within_2fold = mean(abs(log10_ratio_tbx_mc) <= log10(2))) |> print()
-}
-
-
-# ---- 13. Other ID checks and save -------------------------------------------
-# record_id different from id, duplicated IDs, season in ID vs collection date
-d <- quantificationlabresults |>
-  mutate(season_date = case_when(is.na(date_prelev) ~ NA_character_,
-                                 month(date_prelev) %in% 3:5  ~ "dry",
-                                 month(date_prelev) %in% 6:10 ~ "rainy",
-                                 TRUE ~ "other"))
-
-quantificationlabresults |> filter(record_id != id_orig | duplicated(id_clean) | is.na(household) |
-              is.na(season) | is.na(sample_type) | str_count(id_clean, "\\d{5}") > 1 |
-              (!is.na(season) & !is.na(season_date) & season != season_date)) |>
-  select(record_id, id_orig, id_clean, household, type_code, sample_type, season,
-         season_date, date_prelev) |>
-  write_csv(file.path(out_dir, "flagged_id_issues.csv"))
-
-saveRDS(d, file.path(out_dir, "lab_environment_clean.rds"))
-write_csv(d, file.path(out_dir, "lab_environment_clean.csv"))
-cat("\nDone. Files written to", out_dir, "\n")
+#export cleaned database
+quantificationlabresults_clean <- quantificationlabresults |>
+  select(
+    # identification
+    record_id, id = id_clean, household, sample_type, season,
+    # dates
+    date_prelev, date_recep_lab, date_deb_trait,
+    # sample processing
+    filtration, vol_mL, med_mcc, med_mcc_ctx, med_tbx, med_tbx_ctx,
+    # titers (E. coli = MC/TBX, ESBL = MC+CTX/TBX+CTX)
+    titer_ecoli, titer_ecoli_log10, titer_esbl, titer_esbl_log10,
+    # colony counts (cens_ = TRUE when the count was ">200")
+    c_tbx, cens_tbx, c_tbx_ctx, cens_tbx_ctx,
+    c_mc, cens_mc, c_mc_ctx, cens_mc_ctx,
+    # concentrations as reported by the lab
+    lab_unit, lab_ec, lab_ec_cens, lab_es, lab_es_cens,
+    # concentrations recomputed from count, volume and titer
+    expected_ecoli, expected_ecoli_cens, expected_esbl, expected_esbl_cens)
+write_csv(quantificationlabresults_clean, "lab_environment_clean.csv")
