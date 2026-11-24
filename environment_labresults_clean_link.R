@@ -11,11 +11,12 @@
 pacman::p_load(tidyverse, lubridate, readxl)
 
 # IMPORT DATA----- ------------------------------------------
-setwd("C:/Users/bingelbeen/OneDrive - ITG/Documents/3GCREsourceattribution/data")
-quantificationlabresults <- read_csv("ALARUMSourceAttribut_DATA_2026-11-18_1605.csv", col_types = cols(.default = "c"))
-stoolcollection <- read_excel("ALARUM-Community-DATA_FSH_collecteonly.xlsx", sheet = "Sheet1", col_types = "text")
-hhdata <- read_excel("ALARUM-Community-DATA_FSH_copy_hhdata.xlsx", sheet = "Sheet1", col_types = "text")
-carriage2022 <- read_csv("Household_stool_WASH_BF_long.csv", col_types = cols(.default = "c"), name_repair = "unique_quiet")
+# first make sure you have a folder named 'data' in your project folder (called 3GCREsourceattribution) that contains all the below data files
+quantificationlabresults <- read_csv("data/ALARUMSourceAttribut_DATA_2026-11-18_1605.csv", col_types = cols(.default = "c"))
+alarumredcap <- read_excel("data/ALARUM-Community-DATA_FSH.xlsx", sheet = "Sheet1", col_types = "text")
+stoolcollection <- alarumredcap %>% filter(redcap_repeat_instrument=="collecte_de_selles")
+hhdata <- alarumredcap %>% filter(is.na(redcap_repeat_instrument)) # the general HH data is those without redcap_repeat_instrument value
+carriage2022 <- read_csv("data/Household_stool_WASH_BF_long.csv", col_types = cols(.default = "c"), name_repair = "unique_quiet") #CABU carriage + WASH data
 
 names(quantificationlabresults) <- c(
   "record_id", "id", "date_prelev", "heure_prelev", "date_recep_lab",
